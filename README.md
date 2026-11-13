@@ -5,40 +5,66 @@ Simulador integral de red de sensores **LoRaWAN** de alta concurrencia con codif
 ---
 
 ## Arquitectura del Sistema
+flowchart TB
+    subgraph SIM["📡 SIMULADOR LoRaWAN · Asyncio"]
+        direction TB
+        N["Nodos IoT · 001 → 100+"]
 
-┌────────────────────────────────────────────────────────┐
-│               Simulador LoRaWAN (Asyncio)              │
-│  [Nodo 001] [Nodo 002] ... [Nodo 100+]                 │
-│  - Sensores: Temp, Humedad, Presión, Batería, GPS      │
-│  - Frame Counter (f_cnt) secuencial                    │
-│  - Codificador Binario Cayenne LPP                     │
-│  - Modelo RF: Path Loss, SNR, RSSI, ToA (Semtech)      │
-└──────────────────────────┬─────────────────────────────┘
-                           │ Publica uplink en lorawan/{dev_eui}/uplink
-                           ▼
-┌────────────────────────────────────────────────────────┐
-│                Broker MQTT (Mosquitto)                 │
-│                 Puerto: 1883                           │
-└──────────────────────────┬─────────────────────────────┘
-                           │ Suscripción MQTT
-                           ▼
-┌────────────────────────────────────────────────────────┐
-│             API de Ingestión (FastAPI Backend)         │
-│  - Decodificador Cayenne LPP (Binary -> Telemetría)    │
-│  - Detección de pérdida por salto de f_cnt (Lost Gaps) │
-│  - Cálculo de Latencia (Tiempo en Aire + Backhaul)     │
-│  - Persistencia Asíncrona en SQL (SQLite)              │
-│  - Servidor WebSocket (Transmisión en subsegundo)      │
-└──────────────────────────┬─────────────────────────────┘
-                           │ WebSocket /ws + REST API
-                           ▼
-┌────────────────────────────────────────────────────────┐
-│          Dashboard Web en Tiempo Real (HTML5/JS)       │
-│  - Tarjetas KPI: % Pérdida, Latencia media, Throughput │
-│  - Gráficos interactivos Chart.js                      │
-│  - Feed de tramas decodificadas en vivo                │
-│  - Registro de nodos y consola de control interactiva  │
-└────────────────────────────────────────────────────────┘
+        S["Sensores<br/>🌡️ Temperatura · 💧 Humedad<br/>Presión · 🔋 Batería · 📍 GPS"]
+
+        F["Frame Counter (f_cnt)<br/>Secuencial por dispositivo"]
+
+        LPP["Codificador binario<br/>Cayenne LPP"]
+
+        RF["Modelo RF · Semtech<br/>Path Loss · SNR · RSSI · ToA"]
+
+        N --> S
+        N --> F
+        S --> LPP
+        F --> LPP
+        LPP --> RF
+    end
+
+    MQTT["📨 BROKER MQTT · Mosquitto<br/>Puerto 1883<br/>Topic: lorawan/{dev_eui}/uplink"]
+
+    subgraph API["⚙️ BACKEND · FastAPI"]
+        direction TB
+        DEC["Decodificador Cayenne LPP<br/>Binary → Telemetría"]
+
+        LOSS["Detección de pérdida<br/>Saltos de f_cnt · Lost Gaps"]
+
+        LAT["Cálculo de latencia<br/>Tiempo en Aire + Backhaul"]
+
+        DB[("🗄️ SQLite<br/>Persistencia asíncrona")]
+
+        WS["WebSocket · /ws<br/>Transmisión en tiempo real"]
+
+        DEC --> LOSS
+        DEC --> LAT
+        LOSS --> DB
+        LAT --> DB
+        DEC --> WS
+    end
+
+    subgraph DASH["📊 DASHBOARD WEB · HTML5 / JavaScript"]
+        direction TB
+        KPI["KPIs en tiempo real<br/>Pérdida · Latencia media · Throughput"]
+
+        CHART["Gráficos interactivos<br/>Chart.js"]
+
+        FEED["Feed de tramas<br/>Decodificadas en vivo"]
+
+        CTRL["Registro de nodos<br/>Consola de control interactiva"]
+    end
+
+    SIM -->|"Uplink LoRaWAN simulado"| MQTT
+    MQTT -->|"Suscripción MQTT"| API
+    WS -->|"WebSocket /ws + REST API"| DASH
+
+    style SIM fill:#173B57,stroke:#38BDF8,color:#FFFFFF
+    style API fill:#183D35,stroke:#34D399,color:#FFFFFF
+    style DASH fill:#382B58,stroke:#A78BFA,color:#FFFFFF
+    style MQTT fill:#55401C,stroke:#FBBF24,color:#FFFFFF
 
 ---
 
@@ -59,31 +85,38 @@ Una vez iniciado, abre en tu navegador:
 ##  Estructura del Proyecto
 
 proyecto/
-├── config/
-│   └── mosquitto.conf          # Configuración del Broker Mosquitto
-├── core/
+│
+├── ⚙️ config/
+│   └── mosquitto.conf          # Configuración del broker Mosquitto
+│
+├── 🧠 core/
 │   ├── __init__.py
-│   ├── cayenne_lpp.py          # Codificador y Decodificador Cayenne LPP
+│   ├── cayenne_lpp.py          # Codificador y decodificador Cayenne LPP
 │   ├── database.py             # Motor SQLite asíncrono (aiosqlite)
-│   └── models.py               # Modelos de datos Pydantic y LoRaWAN
-├── simulator/
+│   └── models.py               # Modelos Pydantic y LoRaWAN
+│
+├── 📡 simulator/
 │   ├── __init__.py
-│   ├── node.py                 # Dispositivo LoRaWAN simulado con sensores
-│   ├── network_channel.py      # Modelo de propagación RF, Time on Air y pérdidas
-│   └── simulator.py            # Motor de simulación concurrente (100+ nodos)
-├── backend/
+│   ├── node.py                 # Dispositivos LoRaWAN simulados y sensores
+│   ├── network_channel.py      # Propagación RF, Time on Air y pérdidas
+│   └── simulator.py            # Motor concurrente (100+ nodos)
+│
+├── 🚀 backend/
 │   ├── __init__.py
-│   ├── mqtt_service.py         # Consumidor MQTT, cálculo de métricas y WebSocket
-│   └── api.py                  # Endpoints REST y servidor FastAPI
-├── web/
+│   ├── mqtt_service.py         # Consumidor MQTT, métricas y WebSocket
+│   └── api.py                  # API REST y servidor FastAPI
+│
+├── 🌐 web/
 │   └── static/
-│       ├── index.html          # Panel de control web moderno en modo oscuro
-│       └── app.js              # Cliente WebSocket, Chart.js y tabla en tiempo real
-├── scripts/
-│   ├── run_all.py              # Orquestador todo-en-uno
-│   └── test_cayenne.py         # Tests unitarios de Cayenne LPP y ToA
-├── requirements.txt
-└── README.md
+│       ├── index.html          # Dashboard web en modo oscuro
+│       └── app.js              # Cliente WebSocket, Chart.js y telemetría
+│
+├── 🧪 scripts/
+│   ├── run_all.py              # Orquestador de ejecución completa
+│   └── test_cayenne.py         # Tests de Cayenne LPP y Time on Air
+│
+├── 📦 requirements.txt         # Dependencias del proyecto
+└── 📖 README.md                # Documentación principal
 
 
 ---
