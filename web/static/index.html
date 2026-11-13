@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulador LoRaWAN + Dashboard en Tiempo Real</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            lora: {
+              50: '#f0fdf4',
+              500: '#22c55e',
+              600: '#16a34a',
+            },
+            dark: {
+              900: '#0b0f19',
+              800: '#111827',
+              700: '#1f2937',
+              600: '#374151'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .animate-pulse-subtle {
+      animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #111827;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #374151;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #4b5563;
+    }
+  </style>
+</head>
+<body class="bg-dark-900 text-slate-100 font-sans min-h-screen antialiased flex flex-col">
+
+  <!-- Top Navigation Bar -->
+  <header class="border-b border-dark-700 bg-dark-800/80 backdrop-blur sticky top-0 z-50 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+        <i data-lucide="radio" class="w-5 h-5 text-white"></i>
+      </div>
+      <div>
+        <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+          Simulador LoRaWAN <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono font-medium border border-emerald-500/30">Cayenne LPP</span>
+        </h1>
+        <p class="text-xs text-slate-400">Broker MQTT &bull; Ingestión SQL &bull; Métricas en Tiempo Real</p>
+      </div>
+    </div>
+
+    <!-- Live Status Indicators & Actions -->
+    <div class="flex items-center gap-3">
+      <!-- WS Status -->
+      <div id="ws-badge" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-dark-700/60 border border-dark-600 text-xs">
+        <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+        <span id="ws-text" class="text-slate-300 font-medium">Conectando...</span>
+      </div>
+
+      <!-- Simulator State Badge -->
+      <div id="sim-badge" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-950/60 border border-emerald-800/60 text-xs text-emerald-400">
+        <i data-lucide="play" class="w-3.5 h-3.5"></i>
+        <span id="sim-state-text" class="font-medium">Simulador Activo</span>
+      </div>
+
+      <!-- Controls -->
+      <button id="btn-toggle-sim" onclick="toggleSimulator()" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-semibold flex items-center gap-1.5 transition">
+        <i data-lucide="pause" class="w-3.5 h-3.5"></i>
+        <span id="btn-toggle-text">Pausar</span>
+      </button>
+
+      <button onclick="clearDb()" title="Reiniciar métricas y base de datos" class="px-3 py-1.5 rounded-lg bg-dark-700 hover:bg-red-900/50 hover:text-red-300 border border-dark-600 text-slate-300 text-xs flex items-center gap-1.5 transition">
+        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+        <span>Limpiar DB</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6">
+
+    <!-- KPI Metric Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      
+      <!-- Card 1: Pérdida de Paquetes -->
+      <div class="bg-dark-800 border border-dark-700 rounded-2xl p-5 shadow-sm relative overflow-hidden">
+        <div class="flex items-center justify-between text-slate-400 mb-2">
+          <span class="text-xs font-medium uppercase tracking-wider">Pérdida de Paquetes</span>
+          <i data-lucide="shield-alert" class="w-4 h-4 text-rose-400"></i>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span id="kpi-loss-pct" class="text-3xl font-extrabold text-white tracking-tight">0.0%</span>
+          <span id="kpi-loss-badge" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Óptimo</span>
+        </div>
+        <div class="mt-3 flex items-center justify-between text-xs text-slate-400 border-t border-dark-700/60 pt-2.5">
+          <span>Perdidos: <strong id="kpi-lost-count" class="text-rose-400">0</strong></span>
+          <span>Esperados: <strong id="kpi-expected-count" class="text-slate-300">0</strong></span>
+        </div>
+      </div>
+
+      <!-- Card 2: Latencia Media -->
+      <div class="bg-dark-800 border border-dark-700 rounded-2xl p-5 shadow-sm relative overflow-hidden">
+        <div class="flex items-center justify-between text-slate-400 mb-2">
+          <span class="text-xs font-medium uppercase tracking-wider">Latencia Media (End-to-End)</span>
+          <i data-lucide="gauge" class="w-4 h-4 text-cyan-400"></i>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span id="kpi-avg-latency" class="text-3xl font-extrabold text-white tracking-tight">0.0</span>
+          <span class="text-xs font-mono text-cyan-400">ms</span>
+        </div>
+        <div class="mt-3 flex items-center justify-between text-xs text-slate-400 border-t border-dark-700/60 pt-2.5">
+          <span>Min: <strong id="kpi-min-latency" class="text-slate-300">0</strong> ms</span>
+          <span>Max: <strong id="kpi-max-latency" class="text-slate-300">0</strong> ms</span>
+        </div>
+      </div>
+
+      <!-- Card 3: Nodos Activos -->
+      <div class="bg-dark-800 border border-dark-700 rounded-2xl p-5 shadow-sm relative overflow-hidden">
+        <div class="flex items-center justify-between text-slate-400 mb-2">
+          <span class="text-xs font-medium uppercase tracking-wider">Nodos Simulados</span>
+          <i data-lucide="cpu" class="w-4 h-4 text-emerald-400"></i>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span id="kpi-active-nodes" class="text-3xl font-extrabold text-white tracking-tight">0</span>
+          <span class="text-xs text-slate-400">/ <span id="kpi-total-nodes">0</span> registrados</span>
+        </div>
+        <div class="mt-3 flex items-center justify-between text-xs text-slate-400 border-t border-dark-700/60 pt-2.5">
+          <span>Estado Red: <span class="text-emerald-400 font-medium">En línea</span></span>
+          <span>Banda: <span class="text-slate-300">EU868</span></span>
+        </div>
+      </div>
+
+      <!-- Card 4: Tasa de Recepción (Throughput) -->
+      <div class="bg-dark-800 border border-dark-700 rounded-2xl p-5 shadow-sm relative overflow-hidden">
+        <div class="flex items-center justify-between text-slate-400 mb-2">
+          <span class="text-xs font-medium uppercase tracking-wider">Throughput / Tramas</span>
+          <i data-lucide="activity" class="w-4 h-4 text-amber-400"></i>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span id="kpi-throughput" class="text-3xl font-extrabold text-white tracking-tight">0.0</span>
+          <span class="text-xs font-mono text-amber-400">pkts/s</span>
+        </div>
+        <div class="mt-3 flex items-center justify-between text-xs text-slate-400 border-t border-dark-700/60 pt-2.5">
+          <span>Total Recibidos: <strong id="kpi-received-count" class="text-slate-300">0</strong></span>
+          <span>Tiempo: <span id="kpi-uptime" class="text-slate-400">0s</span></span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Simulator Control Box -->
+    <div class="bg-dark-800 border border-dark-700 rounded-2xl p-5">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-2">
+          <i data-lucide="sliders" class="w-4 h-4 text-emerald-400"></i>
+          <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-200">Consola de Control del Simulador</h2>
+        </div>
+        <span class="text-xs text-slate-400">Ajusta los parámetros de la red en tiempo real</span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Control 1: Cantidad de Nodos -->
+        <div class="space-y-2">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-400">Número de Nodos:</span>
+            <span id="val-nodes" class="font-bold text-emerald-400 font-mono">100</span>
+          </div>
+          <input id="slider-nodes" type="range" min="10" max="500" step="10" value="100"
+            class="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+            oninput="document.getElementById('val-nodes').innerText = this.value">
+          <div class="flex justify-between text-[10px] text-slate-500">
+            <span>10</span>
+            <span>250</span>
+            <span>500 nodos</span>
+          </div>
+        </div>
+
+        <!-- Control 2: Intervalo de Envío -->
+        <div class="space-y-2">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-400">Intervalo por Nodo:</span>
+            <span id="val-interval" class="font-bold text-cyan-400 font-mono">5.0s</span>
+          </div>
+          <input id="slider-interval" type="range" min="1.0" max="15.0" step="0.5" value="5.0"
+            class="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+            oninput="document.getElementById('val-interval').innerText = this.value + 's'">
+          <div class="flex justify-between text-[10px] text-slate-500">
+            <span>1.0s (Rápido)</span>
+            <span>7.5s</span>
+            <span>15.0s (Lento)</span>
+          </div>
+        </div>
+
+        <!-- Control 3: Inyección de Pérdida de Paquetes -->
+        <div class="space-y-2">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-400">Probabilidad de Pérdida (Canal):</span>
+            <span id="val-loss" class="font-bold text-rose-400 font-mono">6%</span>
+          </div>
+          <input id="slider-loss" type="range" min="0" max="0.40" step="0.01" value="0.06"
+            class="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer accent-rose-500"
+            oninput="document.getElementById('val-loss').innerText = Math.round(this.value * 100) + '%'">
+          <div class="flex justify-between text-[10px] text-slate-500">
+            <span>0% (Ideal)</span>
+            <span>20%</span>
+            <span>40% (Severa)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 pt-3 border-t border-dark-700 flex justify-end">
+        <button onclick="applySimConfig()" class="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold shadow-md shadow-emerald-600/20 active:scale-95 transition flex items-center gap-2">
+          <i data-lucide="check" class="w-3.5 h-3.5"></i>
+          <span>Aplicar Cambios a la Simulación</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Charts Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Chart 1: Latencia -->
+      <div class="bg-dark-800 border border-dark-700 rounded-2xl p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+            <i data-lucide="trending-up" class="w-4 h-4 text-cyan-400"></i>
+            <span>Histórico de Latencia (ms)</span>
+          </h3>
+          <span class="text-[11px] text-slate-400 font-mono">Tiempo en el Aire + Backhaul</span>
+        </div>
+        <div class="h-64 relative">
+          <canvas id="chart-latency"></canvas>
+        </div>
+      </div>
+
+      <!-- Chart 2: Pérdida de paquetes & Throughput -->
+      <div class="bg-dark-800 border border-dark-700 rounded-2xl p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+            <i data-lucide="bar-chart-2" class="w-4 h-4 text-rose-400"></i>
+            <span>Tasa de Pérdida (%) & Throughput</span>
+          </h3>
+          <span class="text-[11px] text-slate-400 font-mono">Gaps en Frame Counter (f_cnt)</span>
+        </div>
+        <div class="h-64 relative">
+          <canvas id="chart-loss"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Split: Live Telemetry Feed & Nodes Registry -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- Live Packet Stream Feed (5 cols) -->
+      <div class="lg:col-span-5 bg-dark-800 border border-dark-700 rounded-2xl p-5 flex flex-col h-[520px]">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-200">Flujo en Vivo de Tramas</h3>
+          </div>
+          <span class="text-[11px] text-slate-400">Decodificación Cayenne LPP</span>
+        </div>
+        
+        <!-- Live Packet Stream List -->
+        <div id="packet-feed" class="flex-1 overflow-y-auto space-y-2.5 pr-1 font-mono text-xs">
+          <!-- Dynamically filled by app.js -->
+          <div class="text-center py-10 text-slate-500">Esperando paquetes LoRaWAN...</div>
+        </div>
+      </div>
+
+      <!-- Node Registry Table (7 cols) -->
+      <div class="lg:col-span-7 bg-dark-800 border border-dark-700 rounded-2xl p-5 flex flex-col h-[520px]">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div class="flex items-center gap-2">
+            <i data-lucide="layers" class="w-4 h-4 text-emerald-400"></i>
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-200">Registro de Nodos LoRaWAN</h3>
+          </div>
+          <!-- Search box -->
+          <div class="relative">
+            <input id="node-search" type="text" placeholder="Buscar DevEUI..." 
+              oninput="filterNodesTable()"
+              class="w-48 bg-dark-700/80 border border-dark-600 rounded-lg px-2.5 py-1 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <div class="flex-1 overflow-y-auto border border-dark-700/60 rounded-xl">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-dark-700/60 text-slate-400 text-[11px] uppercase sticky top-0 backdrop-blur z-10">
+              <tr>
+                <th class="p-2.5">DevEUI</th>
+                <th class="p-2.5">Último f_cnt</th>
+                <th class="p-2.5">Pérdida %</th>
+                <th class="p-2.5">Latencia</th>
+                <th class="p-2.5">RSSI / SNR</th>
+                <th class="p-2.5">Batería</th>
+                <th class="p-2.5">Estado</th>
+              </tr>
+            </thead>
+            <tbody id="nodes-table-body" class="divide-y divide-dark-700/50 font-mono">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-dark-700 bg-dark-800/40 text-center py-4 text-xs text-slate-500">
+    Simulador LoRaWAN v1.0 &bull; Creado con Python (FastAPI + Paho-MQTT + SQLite) &bull; Protocolo Cayenne LPP
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
